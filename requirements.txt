@@ -1,0 +1,5 @@
+customtkinter
+firebase-admin
+reportlab
+tkcalendar
+pillow
