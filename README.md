@@ -47,3 +47,4 @@ The default password for sensitive actions (deleting bills) is: `ArJuN`
 - **Database**: Firebase Admin SDK (Firestore)
 - **PDF**: ReportLab
 - **Table View**: Tkinter Treeview (styled)
+"# sunny-billing-application-13-03-2026" 
