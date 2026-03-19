@@ -1,4 +1,4 @@
-from reportlab.lib.pagesizes import A6
+# Removed A6 import
 from reportlab.pdfgen import canvas
 from reportlab.lib import colors
 from reportlab.lib.units import mm
@@ -18,8 +18,9 @@ class BillingManager:
     def generate_pdf(bill_data, filename="receipt.pdf"):
         try:
             full_path = BillingManager.resolve_path(filename)
-            c = canvas.Canvas(full_path, pagesize=A6)
-            width, height = A6
+            pagesize = (80*mm, 210*mm)
+            c = canvas.Canvas(full_path, pagesize=pagesize)
+            width, height = pagesize
             
             # Header
             c.setFont("Helvetica-Bold", 16)
@@ -78,12 +79,50 @@ class BillingManager:
             c.save()
             
             # Send to default printer on Windows
+            # Provide raw text to win32print if possible for POS thermal printers
             try:
-                os.startfile(full_path, "print")
+                import win32print
+                text = "            DROP\n"
+                text += "  City Center Kunnamkulam, Thrissur\n"
+                text += " Near Private Bus Stand, Kunnamkulam\n"
+                text += "-" * 40 + "\n"
+                ts = bill_data.get('timestamp', '')
+                ts_str = ts.strftime('%Y-%m-%d %H:%M:%S') if hasattr(ts, 'strftime') else str(ts)
+                text += f"Date & Time: {ts_str}\n"
+                text += f"Bill ID: {bill_data.get('id', 'N/A')}\n"
+                text += "-" * 40 + "\n"
+                text += f"{'Item':<20} {'Qty':>3} {'Price':>8} {'Total':>8}\n"
+                text += "-" * 40 + "\n"
+                for item in bill_data.get('items', []):
+                    name = str(item['name'])[:18]
+                    text += f"{name:<20} {int(item['quantity']):>3} {float(item['price']):>8.2f} {float(item['line_total']):>8.2f}\n"
+                text += "-" * 40 + "\n"
+                text += f"{'GRAND TOTAL:':<30} INR {float(bill_data.get('total', 0)):>5.2f}\n"
+                if bill_data.get('payment_method') == 'both':
+                    text += f"Cash: {float(bill_data.get('cash_amount', 0)):.2f} / UPI: {float(bill_data.get('upi_amount', 0)):.2f}\n"
+                text += "-" * 40 + "\n"
+                text += "    Thank you for shopping at DROP\n\n\n\n\n"
+                text += "\x1d\x56\x00" # ESC/POS full cut command
+
+                printer_name = win32print.GetDefaultPrinter()
+                hPrinter = win32print.OpenPrinter(printer_name)
+                try:
+                    win32print.StartDocPrinter(hPrinter, 1, ("Receipt", None, "RAW"))
+                    win32print.StartPagePrinter(hPrinter)
+                    win32print.WritePrinter(hPrinter, text.encode('cp1252', errors='replace'))
+                    win32print.EndPagePrinter(hPrinter)
+                    win32print.EndDocPrinter(hPrinter)
+                finally:
+                    win32print.ClosePrinter(hPrinter)
                 return True
-            except Exception as pe:
-                print(f"Printing error: {pe}")
-                return True # PDF was still saved at least
+            except Exception as e:
+                print(f"Direct raw print failed: {e}")
+                try:
+                    os.startfile(full_path, "print")
+                    return True
+                except Exception as pe:
+                    print(f"Printing error: {pe}")
+                    return True # PDF was still saved at least
         except Exception as e:
             print(f"Error generating PDF: {e}")
             return False
