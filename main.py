@@ -406,9 +406,18 @@ class DROPApp(ctk.CTk):
         btn_frame = ctk.CTkFrame(popup, fg_color="transparent")
         btn_frame.pack(side="bottom", pady=20)
         
-        print_btn = ctk.CTkButton(btn_frame, text="Print Bill", 
-                                 command=lambda: [BillingManager.generate_pdf(bill_data), 
-                                                messagebox.showinfo("Success", "Sending bill to printer...")])
+        def trigger_print():
+            import threading
+            def _print():
+                # Runs in background thread to prevent 'Not Responding' UI freeze
+                import tkinter as tk
+                from tkinter import messagebox
+                BillingManager.generate_pdf(bill_data)
+                # Show success message safely from UI thread (using complete after block)
+                popup.after(0, lambda: messagebox.showinfo("Success", "Bill sent to printer!"))
+            threading.Thread(target=_print, daemon=True).start()
+
+        print_btn = ctk.CTkButton(btn_frame, text="Print Bill", command=trigger_print)
         print_btn.pack(side="left", padx=10)
         
         close_btn = ctk.CTkButton(btn_frame, text="Close", fg_color="#333", command=popup.destroy)
@@ -639,5 +648,11 @@ class DROPApp(ctk.CTk):
                 messagebox.showerror("Error", "Failed to delete.")
 
 if __name__ == "__main__":
-    app = DROPApp()
-    app.mainloop()
+    try:
+        app = DROPApp()
+        app.mainloop()
+    except Exception as e:
+        import traceback
+        with open("crash_log.txt", "w") as f:
+            f.write(traceback.format_exc())
+        print(f"CRASH: {e}")

@@ -105,7 +105,8 @@ class BillingManager:
                 text += "\x1d\x56\x00" # ESC/POS full cut command
 
                 printer_name = win32print.GetDefaultPrinter()
-                printers = win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS)
+                # Scan ONLY local printers to avoid network hang ("Not Responding")
+                printers = win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL)
                 for p in printers:
                     name_upper = p[2].upper()
                     if "RETSOL" in name_upper or "RTP" in name_upper or "POS" in name_upper:
