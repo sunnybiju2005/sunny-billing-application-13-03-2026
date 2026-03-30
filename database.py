@@ -90,10 +90,11 @@ class Database:
     def save_bill(self, bill_data):
         if not self.db: return False, "Database not initialized"
         try:
-            # bill_data should contain items, total, payment_method, etc.
-            bill_data['timestamp'] = firestore.SERVER_TIMESTAMP
+            # Create a copy so we don't mutate the UI's local timestamp with the db sentinel
+            db_data = bill_data.copy()
+            db_data['timestamp'] = firestore.SERVER_TIMESTAMP
             doc_ref = self.db.collection('bills').document()
-            doc_ref.set(bill_data)
+            doc_ref.set(db_data)
             return True, doc_ref.id
         except Exception as e:
             error_msg = str(e)
