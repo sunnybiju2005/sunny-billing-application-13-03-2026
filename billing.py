@@ -105,6 +105,13 @@ class BillingManager:
                 text += "\x1d\x56\x00" # ESC/POS full cut command
 
                 printer_name = win32print.GetDefaultPrinter()
+                printers = win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS)
+                for p in printers:
+                    name_upper = p[2].upper()
+                    if "RETSOL" in name_upper or "RTP" in name_upper or "POS" in name_upper:
+                        printer_name = p[2]
+                        break
+
                 hPrinter = win32print.OpenPrinter(printer_name)
                 try:
                     win32print.StartDocPrinter(hPrinter, 1, ("Receipt", None, "RAW"))
