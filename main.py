@@ -1,3 +1,13 @@
+import os
+import sys
+
+# PyInstaller with console=False sets sys.stdout/stderr to None.
+# gRPC (used by Firebase Firestore) will deadlock on Windows if it tries to write to a None stderr.
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w")
+
 import customtkinter as ctk
 import tkinter as tk
 from tkinter import messagebox, ttk
@@ -5,7 +15,6 @@ from database import Database
 from billing import BillingManager
 from tkcalendar import DateEntry
 from datetime import datetime
-import os
 
 # Set UI appearance
 ctk.set_appearance_mode("dark")
@@ -349,7 +358,7 @@ class DROPApp(ctk.CTk):
         }
         
         if not self.db.connected:
-            messagebox.showerror("DB Error", "Not connected to Firebase.")
+            messagebox.showerror("DB Error", "Not connected to Local Database.")
             return
 
         success, res = self.db.save_bill(bill_data)
@@ -359,7 +368,7 @@ class DROPApp(ctk.CTk):
             self.cart = []
             self.render_cart()
         else:
-            messagebox.showerror("Firebase Error", f"Failed to save bill to Firebase:\n\n{res}")
+            messagebox.showerror("DB Error", f"Failed to save bill to Local Database:\n\n{res}")
 
     def show_receipt_popup(self, bill_data):
         popup = ctk.CTkToplevel(self)
@@ -372,7 +381,6 @@ class DROPApp(ctk.CTk):
         ts_str = ts.strftime('%Y-%m-%d %H:%M:%S') if hasattr(ts, 'strftime') else str(ts)
         
         receipt_text = "            DROP\n"
-        receipt_text += "  City Center Kunnamkulam, Thrissur\n"
         receipt_text += " Near Private Bus Stand, Kunnamkulam\n"
         receipt_text += "-" * 40 + "\n"
         receipt_text += f"Date & Time: {ts_str}\n"
@@ -444,7 +452,7 @@ class DROPApp(ctk.CTk):
         footer = ctk.CTkFrame(self, height=30, fg_color="#111")
         footer.pack(fill="x", side="bottom")
         
-        status_text = "Firebase: Connected ✅" if self.db.connected else "Firebase: Not Connected ❌"
+        status_text = "Local DB: Connected ✅" if self.db.connected else "Local DB: Not Connected ❌"
         status_color = "#00ff00" if self.db.connected else "#ff0000"
         ctk.CTkLabel(footer, text=status_text, text_color=status_color, font=ctk.CTkFont(size=12)).pack(side="left", padx=10)
         
@@ -632,7 +640,7 @@ class DROPApp(ctk.CTk):
                 self.inv_price.delete(0, 'end')
                 self.load_inventory_list()
             else:
-                messagebox.showerror("Firebase Error", f"Failed to add to Firebase:\n\n{msg}")
+                messagebox.showerror("DB Error", f"Failed to add to Local Database:\n\n{msg}")
         except Exception as e:
             messagebox.showerror("Error", f"Price must be a number.\n({str(e)})")
 
@@ -648,6 +656,8 @@ class DROPApp(ctk.CTk):
                 messagebox.showerror("Error", "Failed to delete.")
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
     try:
         app = DROPApp()
         app.mainloop()

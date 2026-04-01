@@ -26,10 +26,8 @@ class BillingManager:
             c.setFont("Helvetica-Bold", 16)
             c.drawCentredString(width/2, height - 20, "DROP")
             c.setFont("Helvetica", 10)
-            c.drawCentredString(width/2, height - 35, "City Center Kunnamkulam, Thrissur")
-            c.setFont("Helvetica", 9)
-            c.drawCentredString(width/2, height - 48, "Near Private Bus Stand, Kunnamkulam")
-            c.line(10, height - 55, width - 10, height - 55)
+            c.drawCentredString(width/2, height - 38, "Near Private Bus Stand, Kunnamkulam")
+            c.line(10, height - 45, width - 10, height - 45)
             
             # Bill Info
             c.setFont("Helvetica", 9)
@@ -83,7 +81,6 @@ class BillingManager:
             try:
                 import win32print
                 text = "            DROP\n"
-                text += "  City Center Kunnamkulam, Thrissur\n"
                 text += " Near Private Bus Stand, Kunnamkulam\n"
                 text += "-" * 40 + "\n"
                 ts = bill_data.get('timestamp', '')
