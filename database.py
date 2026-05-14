@@ -32,9 +32,12 @@ class Database:
                 id TEXT PRIMARY KEY,
                 name TEXT,
                 category TEXT,
-                price REAL
+                price REAL,
+                barcode TEXT
             )
             ''')
+
+            self.migrate_db() # Handle schema updates
 
             self.cursor.execute('''
             CREATE TABLE IF NOT EXISTS bills (
@@ -56,17 +59,28 @@ class Database:
             self.connected = False
             return False
 
+    def migrate_db(self):
+        """Add columns if they don't exist"""
+        try:
+            self.cursor.execute("PRAGMA table_info(clothes)")
+            columns = [info[1] for info in self.cursor.fetchall()]
+            if 'barcode' not in columns:
+                self.cursor.execute("ALTER TABLE clothes ADD COLUMN barcode TEXT")
+                self.db.commit()
+        except Exception as e:
+            print(f"Migration error: {e}")
+
     def is_connected(self):
         return self.connected
 
     # --- Clothes Methods ---
-    def add_cloth(self, name, category, price):
+    def add_cloth(self, name, category, price, barcode=None):
         if not self.connected: return False, "Database not initialized"
         try:
             self.cursor.execute('''
-            INSERT OR REPLACE INTO clothes (id, name, category, price) 
-            VALUES (?, ?, ?, ?)
-            ''', (name, name, category, float(price)))
+            INSERT OR REPLACE INTO clothes (id, name, category, price, barcode) 
+            VALUES (?, ?, ?, ?, ?)
+            ''', (name, name, category, float(price), barcode))
             self.db.commit()
             return True, "Success"
         except Exception as e:
@@ -74,12 +88,28 @@ class Database:
             print(f"Error adding cloth: {error_msg}")
             return False, error_msg
 
+    def update_cloth(self, original_name, new_name, category, price, barcode=None):
+        if not self.connected: return False, "Database not initialized"
+        try:
+            # If name changes, we need to handle it carefully since name is currently the ID
+            self.cursor.execute('''
+            UPDATE clothes 
+            SET id = ?, name = ?, category = ?, price = ?, barcode = ?
+            WHERE id = ?
+            ''', (new_name, new_name, category, float(price), barcode, original_name))
+            self.db.commit()
+            return True, "Success"
+        except Exception as e:
+            error_msg = str(e)
+            print(f"Error updating cloth: {error_msg}")
+            return False, error_msg
+
     def get_all_clothes(self):
         if not self.connected: return []
         try:
-            self.cursor.execute("SELECT name, category, price FROM clothes")
+            self.cursor.execute("SELECT name, category, price, barcode FROM clothes")
             rows = self.cursor.fetchall()
-            return [{'name': row[0], 'category': row[1], 'price': row[2]} for row in rows]
+            return [{'name': row[0], 'category': row[1], 'price': row[2], 'barcode': row[3]} for row in rows]
         except Exception as e:
             print(f"Error getting clothes: {e}")
             return []

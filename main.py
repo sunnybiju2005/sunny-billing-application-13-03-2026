@@ -15,6 +15,10 @@ from database import Database
 from billing import BillingManager
 from tkcalendar import DateEntry
 from datetime import datetime
+import barcode
+from barcode.writer import ImageWriter
+from PIL import Image, ImageTk
+import io
 
 # Set UI appearance
 ctk.set_appearance_mode("dark")
@@ -34,6 +38,7 @@ class DROPApp(ctk.CTk):
         self.cart = []
         self.current_user_type = None # "staff" or "admin"
         self.pay_mode = ctk.StringVar(value="cash")
+        self.editing_item = None # Track item being edited in inventory
         
         # Configure Grid
         self.grid_columnconfigure(0, weight=1)
@@ -267,9 +272,9 @@ class DROPApp(ctk.CTk):
         code = self.search_entry.get().strip()
         if not code: return
         
-        # Look up in all clothes
+        # Look up in all clothes by name OR barcode
         clothes = self.db.get_all_clothes()
-        match = next((item for item in clothes if item['name'].lower() == code.lower()), None)
+        match = next((item for item in clothes if item['name'].lower() == code.lower() or (item.get('barcode') and item['barcode'] == code)), None)
         
         if match:
             self.add_to_cart(match['name'], match['price'])
@@ -510,6 +515,22 @@ class DROPApp(ctk.CTk):
         self.bill_tree.pack(fill="both", expand=True, padx=10, pady=5)
         self.bill_tree.bind("<Double-1>", lambda e: self.show_bill_detail())
 
+        # Total Summary Footer
+        self.summary_frame = ctk.CTkFrame(self.tab_bills, fg_color="#222", corner_radius=10)
+        self.summary_frame.pack(fill="x", padx=10, pady=5)
+        
+        self.lbl_total_all = ctk.CTkLabel(self.summary_frame, text="Total Amount: ₹0.00", font=ctk.CTkFont(size=14, weight="bold"), text_color="#00ffcc")
+        self.lbl_total_all.pack(side="left", padx=20, pady=10)
+        
+        self.lbl_total_cash = ctk.CTkLabel(self.summary_frame, text="Cash: ₹0.00", font=ctk.CTkFont(size=14), text_color="#ffcc00")
+        self.lbl_total_cash.pack(side="left", padx=20, pady=10)
+        
+        self.lbl_total_upi = ctk.CTkLabel(self.summary_frame, text="UPI: ₹0.00", font=ctk.CTkFont(size=14), text_color="#00ccff")
+        self.lbl_total_upi.pack(side="left", padx=20, pady=10)
+        
+        self.lbl_total_both = ctk.CTkLabel(self.summary_frame, text="Both: ₹0.00", font=ctk.CTkFont(size=14), text_color="#cc00ff")
+        self.lbl_total_both.pack(side="left", padx=20, pady=10)
+
         # Actions
         act_frame = ctk.CTkFrame(self.tab_bills, fg_color="transparent")
         act_frame.pack(fill="x", pady=10)
@@ -529,10 +550,27 @@ class DROPApp(ctk.CTk):
         
         bills = self.db.get_bills(date=selected_date, payment_method=method)
         
+        total_all = 0
+        total_cash = 0
+        total_upi = 0
+        total_both = 0
+        
         for b in bills:
+            total_all += b.get('total', 0)
+            total_cash += b.get('cash_amount', 0)
+            total_upi += b.get('upi_amount', 0)
+            if b.get('payment_method', '').lower() == 'both':
+                total_both += b.get('total', 0)
+            
             ts = b.get('timestamp')
             date_str = ts.strftime("%Y-%m-%d %H:%M") if hasattr(ts, 'strftime') else "N/A"
             self.bill_tree.insert("", "end", values=(b['id'], date_str, b.get('payment_method', '').upper(), f"₹{b.get('total', 0):.2f}"))
+
+        # Update summary labels
+        self.lbl_total_all.configure(text=f"Total Amount: ₹{total_all:.2f}")
+        self.lbl_total_cash.configure(text=f"Cash: ₹{total_cash:.2f}")
+        self.lbl_total_upi.configure(text=f"UPI: ₹{total_upi:.2f}")
+        self.lbl_total_both.configure(text=f"Both: ₹{total_both:.2f}")
 
     def show_bill_detail(self):
         sel = self.bill_tree.selection()
@@ -591,7 +629,8 @@ class DROPApp(ctk.CTk):
         form = ctk.CTkFrame(self.tab_inventory)
         form.pack(fill="x", padx=10, pady=10)
         
-        ctk.CTkLabel(form, text="Add New Item", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, columnspan=3, pady=5)
+        self.inv_title_label = ctk.CTkLabel(form, text="Add New Item", font=ctk.CTkFont(weight="bold"))
+        self.inv_title_label.grid(row=0, column=0, columnspan=4, pady=5)
         
         self.inv_name = ctk.CTkEntry(form, placeholder_text="Cloth Name / ID")
         self.inv_name.grid(row=1, column=0, padx=5, pady=5)
@@ -599,20 +638,41 @@ class DROPApp(ctk.CTk):
         self.inv_cat.grid(row=1, column=1, padx=5, pady=5)
         self.inv_price = ctk.CTkEntry(form, placeholder_text="Price")
         self.inv_price.grid(row=1, column=2, padx=5, pady=5)
+        self.inv_barcode = ctk.CTkEntry(form, placeholder_text="Barcode (Optional)")
+        self.inv_barcode.grid(row=1, column=3, padx=5, pady=5)
         
-        ctk.CTkButton(form, text="Add Item", command=self.admin_add_cloth).grid(row=1, column=3, padx=10)
-
+        self.inv_submit_btn = ctk.CTkButton(form, text="Add Item", command=self.admin_add_cloth)
+        self.inv_submit_btn.grid(row=2, column=0, columnspan=2, padx=10, pady=10, sticky="ew")
+        
+        self.inv_cancel_btn = ctk.CTkButton(form, text="Cancel Edit", fg_color="gray", command=self.reset_inv_form)
+        # Cancel button is hidden by default
+        
         # List
-        self.inv_tree = ttk.Treeview(self.tab_inventory, columns=("name", "cat", "price"), show="headings")
+        self.inv_tree = ttk.Treeview(self.tab_inventory, columns=("name", "cat", "price", "barcode"), show="headings")
         self.inv_tree.heading("name", text="Cloth Name (ID)")
         self.inv_tree.heading("cat", text="Category")
         self.inv_tree.heading("price", text="Price")
+        self.inv_tree.heading("barcode", text="Barcode")
         self.inv_tree.pack(fill="both", expand=True, padx=10, pady=5)
         
-        ctk.CTkButton(self.tab_inventory, text="Delete Selected Item", fg_color="#660000", 
-                     command=self.admin_delete_cloth).pack(pady=10)
+        btn_row = ctk.CTkFrame(self.tab_inventory, fg_color="transparent")
+        btn_row.pack(fill="x", padx=10, pady=10)
+
+        ctk.CTkButton(btn_row, text="Edit Selected Item", command=self.admin_edit_cloth).pack(side="left", padx=5)
+        ctk.CTkButton(btn_row, text="Delete Selected Item", fg_color="#660000", command=self.admin_delete_cloth).pack(side="left", padx=5)
+        ctk.CTkButton(btn_row, text="Generate & Download Barcode", fg_color="#006600", command=self.download_barcode_action).pack(side="left", padx=5)
         
         self.load_inventory_list()
+
+    def reset_inv_form(self):
+        self.editing_item = None
+        self.inv_title_label.configure(text="Add New Item")
+        self.inv_submit_btn.configure(text="Add Item")
+        self.inv_name.delete(0, 'end')
+        self.inv_cat.delete(0, 'end')
+        self.inv_price.delete(0, 'end')
+        self.inv_barcode.delete(0, 'end')
+        self.inv_cancel_btn.grid_forget()
 
     def load_inventory_list(self):
         for item in self.inv_tree.get_children():
@@ -620,29 +680,115 @@ class DROPApp(ctk.CTk):
         
         clothes = self.db.get_all_clothes()
         for c in clothes:
-            self.inv_tree.insert("", "end", values=(c['name'], c.get('category', 'N/A'), f"₹{c.get('price', 0):.2f}"))
+            self.inv_tree.insert("", "end", values=(c['name'], c.get('category', 'N/A'), f"₹{c.get('price', 0):.2f}", c.get('barcode', '')))
 
     def admin_add_cloth(self):
         name = self.inv_name.get().strip()
         cat = self.inv_cat.get().strip()
         price = self.inv_price.get().strip()
+        barcode_val = self.inv_barcode.get().strip()
         
         if not name or not price:
             messagebox.showwarning("Error", "Name and Price are required.")
             return
             
+        # Auto-generate barcode if empty
+        if not barcode_val:
+            barcode_val = str(uuid.uuid4().int)[:12] # Generate a simple 12-digit code
+        
         try:
-            success, msg = self.db.add_cloth(name, cat, float(price))
+            if self.editing_item:
+                success, msg = self.db.update_cloth(self.editing_item, name, cat, float(price), barcode_val)
+            else:
+                success, msg = self.db.add_cloth(name, cat, float(price), barcode_val)
+                
             if success:
-                messagebox.showinfo("Success", "Item added.")
-                self.inv_name.delete(0, 'end')
-                self.inv_cat.delete(0, 'end')
-                self.inv_price.delete(0, 'end')
+                messagebox.showinfo("Success", "Item saved.")
+                self.reset_inv_form()
                 self.load_inventory_list()
             else:
-                messagebox.showerror("DB Error", f"Failed to add to Local Database:\n\n{msg}")
+                messagebox.showerror("DB Error", f"Failed to save to Local Database:\n\n{msg}")
         except Exception as e:
             messagebox.showerror("Error", f"Price must be a number.\n({str(e)})")
+
+    def admin_edit_cloth(self):
+        sel = self.inv_tree.selection()
+        if not sel:
+            messagebox.showwarning("Selection", "Select an item to edit.")
+            return
+            
+        values = self.inv_tree.item(sel[0])['values']
+        self.editing_item = values[0]
+        
+        self.inv_title_label.configure(text=f"Editing: {self.editing_item}")
+        self.inv_submit_btn.configure(text="Update Item")
+        
+        self.inv_name.delete(0, 'end')
+        self.inv_name.insert(0, values[0])
+        self.inv_cat.delete(0, 'end')
+        self.inv_cat.insert(0, values[1])
+        self.inv_price.delete(0, 'end')
+        self.inv_price.insert(0, str(values[2]).replace('₹', ''))
+        self.inv_barcode.delete(0, 'end')
+        self.inv_barcode.insert(0, values[3])
+        
+        self.inv_cancel_btn.grid(row=2, column=2, columnspan=2, padx=10, pady=10, sticky="ew")
+
+    def download_barcode_action(self):
+        sel = self.inv_tree.selection()
+        if not sel:
+            messagebox.showwarning("Selection", "Select an item to generate barcode for.")
+            return
+            
+        values = self.inv_tree.item(sel[0])['values']
+        name = values[0]
+        code = str(values[3]) if values[3] and str(values[3]).lower() != "none" else ""
+        
+        if not code:
+            messagebox.showwarning("Missing Data", "This item has no barcode data. Please edit it to add one.")
+            return
+
+        from tkinter import filedialog
+        file_path = filedialog.asksaveasfilename(defaultextension=".png", 
+                                               initialfile=f"barcode_{name}.png",
+                                               filetypes=[("PNG files", "*.png")])
+        if file_path:
+            try:
+                CODE128 = barcode.get_barcode_class('code128')
+                # Use options to hide the default text added by python-barcode
+                my_barcode = CODE128(code, writer=ImageWriter())
+                
+                # Save to a buffer first, disabling the default text
+                buffer = io.BytesIO()
+                my_barcode.write(buffer, options={"write_text": False})
+                buffer.seek(0)
+                
+                img = Image.open(buffer)
+                
+                # Create a new taller image with white background to accommodate text
+                w, h = img.size
+                new_h = h + 60 # Add 60 pixels of space at the bottom
+                new_img = Image.new("RGB", (w, new_h), "white")
+                new_img.paste(img, (0, 0))
+                
+                # Draw the name under the barcode
+                from PIL import ImageDraw, ImageFont
+                draw = ImageDraw.Draw(new_img)
+                # Try to use a font, fallback to default
+                try:
+                    font = ImageFont.truetype("arial.ttf", 25)
+                except:
+                    font = ImageFont.load_default()
+                
+                # Add Name text at the bottom center of the NEW space
+                text_bbox = draw.textbbox((0, 0), name, font=font)
+                text_width = text_bbox[2] - text_bbox[0]
+                draw.text(((w - text_width) / 2, h + 10), name, fill="black", font=font)
+                
+                new_img.save(file_path)
+                messagebox.showinfo("Success", f"Barcode saved to:\n{file_path}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to generate barcode: {e}")
 
     def admin_delete_cloth(self):
         sel = self.inv_tree.selection()
